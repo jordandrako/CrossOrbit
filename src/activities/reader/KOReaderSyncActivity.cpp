@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "Epub/Section.h"
@@ -17,6 +18,7 @@
 #include "HalClock.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
+#include "PendingReadingSessions.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
 #include "SdCardFontSystem.h"
@@ -206,6 +208,9 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   // Sync time with NTP before making API requests
   syncTimeWithNTP();
 
+  // Push any buffered reading sessions now that device time is valid. Best-effort.
+  flushPendingReadingSessions();
+
   {
     RenderLock lock(*this);
     statusMessage = tr(STR_CALC_HASH);
@@ -213,6 +218,44 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   requestUpdate(true);
 
   performSync();
+}
+
+void KOReaderSyncActivity::flushPendingReadingSessions() {
+  if (PENDING_STATS.empty()) {
+    return;
+  }
+
+  const int64_t nowEpoch = static_cast<int64_t>(time(nullptr));
+  // A device with no RTC dates its sessions from this NTP-synced clock. If NTP did
+  // not set a plausible time, skip sessions that need it rather than misdate them.
+  const bool timeIsValid = nowEpoch >= 1600000000LL;
+  bool hasSynthetic = false;
+  for (const auto& session : PENDING_STATS.sessions()) {
+    if (session.startEpoch <= 0) {
+      hasSynthetic = true;
+      break;
+    }
+  }
+  if (!timeIsValid && hasSynthetic) {
+    LOG_ERR("KOSync", "Skipping session flush: no valid clock to date %u buffered sessions",
+            (unsigned)PENDING_STATS.size());
+    return;
+  }
+
+  {
+    RenderLock lock(*this);
+    statusMessage = tr(STR_SYNCING_TIME);
+  }
+  requestUpdate(true);
+
+  const auto result =
+      KOReaderSyncClient::uploadPageStats(PENDING_STATS.sessions(), SETTINGS.getEffectiveDeviceName(), nowEpoch);
+  if (result == KOReaderSyncClient::OK) {
+    LOG_INF("KOSync", "Flushed %u reading session(s) to server", (unsigned)PENDING_STATS.size());
+    PENDING_STATS.clear();
+  } else {
+    LOG_ERR("KOSync", "Reading session flush failed: %s", KOReaderSyncClient::errorString(result).c_str());
+  }
 }
 
 void KOReaderSyncActivity::performSync() {

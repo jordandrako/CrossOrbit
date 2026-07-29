@@ -113,6 +113,10 @@ class KOReaderSyncActivity final : public Activity {
   bool lockInitialConfirmRelease = false;
 
   void onWifiSelectionComplete(bool success);
+  // Best-effort push of buffered reading sessions to the server. Runs after NTP
+  // sync (so device time is valid) and before progress sync; failures are logged
+  // and never block the progress sync flow.
+  void flushPendingReadingSessions();
   void performSync();
   void performUpload();
   bool consumeInitialConfirmRelease();

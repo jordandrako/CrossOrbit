@@ -2,6 +2,9 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
+
+struct PendingReadingSession;
 
 /**
  * Optional document metadata sent alongside progress sync requests.
@@ -100,6 +103,22 @@ class KOReaderSyncClient {
    * @return OK on success, error code on failure
    */
   static Error updateProgress(const KOReaderProgress& progress);
+
+  /**
+   * Upload buffered reading sessions as page-stats events (BookOrbit KOReader
+   * plugin endpoint POST {base}/plugin/page-stats). Each session is expanded into
+   * one or more page-stat events so the server derives a single reading session
+   * per device session with the correct duration and progress.
+   *
+   * @param sessions   Buffered reading sessions to upload.
+   * @param deviceModel Human-readable device/model name for the payload.
+   * @param nowEpoch   Current UTC epoch (seconds), used to date sessions that were
+   *                   captured without an RTC (startEpoch == 0). Sessions with a
+   *                   real startEpoch ignore this.
+   * @return OK on success (including when there is nothing to upload), error code otherwise.
+   */
+  static Error uploadPageStats(const std::vector<PendingReadingSession>& sessions, const std::string& deviceModel,
+                               int64_t nowEpoch);
 
   /**
    * Get human-readable error message.

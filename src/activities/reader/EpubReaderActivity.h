@@ -159,6 +159,10 @@ class EpubReaderActivity final : public Activity {
   GlobalReadingStats globalStats;
   ReadingStatsDateTime sessionStartLocalDateTime;
   bool hasSessionStartLocalDateTime = false;
+  // Book progress (0-100) captured at the first forward page turn of the session,
+  // used to record the session's progress span when pushing sessions to BookOrbit.
+  float sessionStartProgressPercent = 0.0f;
+  bool hasSessionStartProgress = false;
   // Signals that the next render should reposition within the newly loaded section
   // based on a cross-book percentage jump.
   bool pendingPercentJump = false;

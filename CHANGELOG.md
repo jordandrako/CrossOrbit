@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Added
+
+- Reading sessions now push to BookOrbit (or any KOReader-plugin sync server) during a KOReader Sync. Each reading session you complete is buffered on the SD card and uploaded the next time you sync, so BookOrbit records your reading time and progress per book. Point your KOReader sync server URL at your BookOrbit instance (the `/api/v1/koreader` path) and use your BookOrbit KOReader credentials. Devices with a real-time clock date sessions from the RTC; devices without one date them at sync time.
+
 ## [v1.5.0] - 2026-08-08
 
 ### Added

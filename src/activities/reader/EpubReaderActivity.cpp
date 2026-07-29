@@ -6,6 +6,7 @@
 #include <FontCacheManager.h>
 #include <FsHelpers.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -38,10 +39,12 @@
 #include "EpubReaderUtils.h"
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
+#include "KOReaderDocumentId.h"
 #include "KOReaderSyncActivity.h"
 #include "LookedUpWordsActivity.h"
 #include "MappedInputManager.h"
 #include "NearbyBookPositionSyncActivity.h"
+#include "PendingReadingSessions.h"
 #include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
@@ -2092,6 +2095,8 @@ void EpubReaderActivity::onEnter() {
   armReadingPaceWarmup("reader_open");
   sessionReadingSeconds = 0;
   hasSessionStartLocalDateTime = getCurrentLocalReadingStatsDateTime(sessionStartLocalDateTime);
+  hasSessionStartProgress = false;
+  sessionStartProgressPercent = 0.0f;
 
   globalStats = GlobalReadingStats::load();
 
@@ -2160,6 +2165,44 @@ void EpubReaderActivity::onExit() {
       recoverStoredPaceFromSession("reader_exit");
       refreshCachedTimeLeftEstimate();
       stats.save(epub->getCachePath());
+
+      // Buffer this session for later push to a BookOrbit / KOReader-plugin server.
+      // Only real sessions (>= 60s active reading) are kept, and only when KOReader
+      // sync is configured. Dating uses the RTC when present; otherwise the session
+      // is dated at sync time (startEpoch left 0, resolved during the upload).
+      if (elapsedSecs >= 60 && KOREADER_STORE.hasCredentials()) {
+        PendingReadingSession pending;
+        pending.docHash = (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME)
+                              ? KOReaderDocumentId::calculateFromFilename(epub->getPath())
+                              : KOReaderDocumentId::calculate(epub->getPath());
+        if (!pending.docHash.empty()) {
+          uint16_t year = 0;
+          uint8_t month = 0, day = 0, hour = 0, minute = 0;
+          if (halClock.getDateTime(year, month, day, hour, minute)) {
+            const int64_t endEpoch = koReaderCivilToEpoch(year, month, day, hour, minute, 0);
+            const int64_t startEpoch = endEpoch - static_cast<int64_t>(elapsedSecs);
+            pending.startEpoch = startEpoch > 0 ? startEpoch : 1;
+          }
+          pending.durationSeconds = elapsedSecs;
+          pending.totalPages = 1000;
+          const float startPercent = hasSessionStartProgress ? sessionStartProgressPercent : 0.0f;
+          float endPercent = getCurrentBookProgressPercent();
+          if (endPercent <= 0.0f && hasSessionStartProgress) {
+            endPercent = startPercent;
+          }
+          const auto pctToPseudoPage = [](float pct) -> uint16_t {
+            if (pct < 0.0f) pct = 0.0f;
+            if (pct > 100.0f) pct = 100.0f;
+            return static_cast<uint16_t>(pct * 10.0f + 0.5f);
+          };
+          pending.startPage = pctToPseudoPage(startPercent);
+          pending.endPage = pctToPseudoPage(endPercent);
+          PENDING_STATS.add(pending);
+          LOG_DBG("ERS", "Buffered reading session: dur=%lus pages=%u->%u hash=%s",
+                  static_cast<unsigned long>(elapsedSecs), static_cast<unsigned>(pending.startPage),
+                  static_cast<unsigned>(pending.endPage), pending.docHash.c_str());
+        }
+      }
     }
     globalStats.save();
   }
@@ -4519,6 +4562,12 @@ void EpubReaderActivity::pageTurn(bool isForwardTurn, const char* source) {
     uint32_t forwardReadSeconds = 0;
     const bool shouldRecordForwardRead = forwardPageReadElapsed(forwardReadSeconds, source);
     recordCurrentPageReadingTime(source);
+    // Snapshot progress at the start of reading so a pushed session carries its
+    // start-to-end span. Captured on the first forward turn, before the page moves.
+    if (!hasSessionStartProgress) {
+      sessionStartProgressPercent = getCurrentBookProgressPercent();
+      hasSessionStartProgress = true;
+    }
     const bool exitingChapter =
         section && !section->isBuilding() && section->pageCount > 0 && section->currentPage >= section->pageCount - 1;
     // Advance within the section while there are (or may still be) more pages: either a built

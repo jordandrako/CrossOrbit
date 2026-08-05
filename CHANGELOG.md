@@ -2,11 +2,11 @@
 
 ### Added
 
-- Reading sessions now push to BookOrbit (or any KOReader-plugin sync server) during a KOReader Sync. Each reading session you complete is buffered on the SD card and uploaded the next time you sync, so BookOrbit records your reading time and progress per book. Point your KOReader sync server URL at your BookOrbit instance (the `/api/v1/koreader` path) and use your BookOrbit KOReader credentials. Devices with a real-time clock date sessions from the RTC; devices without one date them at sync time.
-
-### Fixed
-
-- Reading-session upload no longer interferes with progress sync. The session push now runs after progress sync completes (when memory is most available) instead of before it, is skipped when free memory is low, and runs silently. Previously, on low-RAM devices, buffered sessions could cause the progress upload to fail.
+- BookOrbit Sync: a dedicated one-stop sync to a self-hosted BookOrbit library server, separate from KOReader Sync. Configure it under Settings > System > BookOrbit by entering your BookOrbit URL and login once; every endpoint is derived from that single URL. A BookOrbit Sync entry also appears in the reader menu and can be assigned to a button shortcut. Each feature can be enabled or disabled independently:
+  - Reading progress with an interactive apply/upload picker, matching the KOReader Sync flow.
+  - Reading sessions: each completed session is buffered on the SD card and uploaded on the next sync, so BookOrbit records reading time and progress per book. Devices with a real-time clock date sessions from the RTC; devices without one date them at sync time.
+  - Highlights: clippings are anchored to their exact text position in the book, buffered, and uploaded as BookOrbit highlights.
+  - Bookmarks: two-way sync for the book open when you sync. New bookmarks you added are pushed, bookmarks added on BookOrbit are pulled down and placed in the book, and removals propagate both directions. Bookmarks for other books are still pushed one-way on the next sync.
 
 ## [v1.5.0] - 2026-08-08
 

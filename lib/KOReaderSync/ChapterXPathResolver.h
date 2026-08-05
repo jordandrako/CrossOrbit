@@ -39,4 +39,18 @@ class ChapterXPathResolver {
   // page position stored in CrossInk's section cache, independent of layout.
   static std::string findXPathForVisibleTextOffset(const std::shared_ptr<Epub>& epub, int spineIndex,
                                                    uint32_t visibleTextOffset);
+
+  /**
+   * Resolve a highlighted text range to KOReader-style start/end xpaths (pos0/pos1),
+   * e.g. /body/DocFragment[8]/body/.../p[4]/text()[1].12 .. text()[1].57 .
+   *
+   * The clip is word-granular, so the clipped text's word sequence is located within the
+   * source paragraph `paragraphIndex` (1-based, matching findXPathForParagraph's p[N]) and
+   * mapped to exact character offsets. Robust to reflow whitespace differences.
+   *
+   * @return true and sets outPos0/outPos1 on success; false if the paragraph or text could
+   *         not be located (caller may fall back to a paragraph-level xpath).
+   */
+  static bool findHighlightXPathRange(const std::shared_ptr<Epub>& epub, int spineIndex, uint16_t paragraphIndex,
+                                      const std::string& text, std::string& outPos0, std::string& outPos1);
 };

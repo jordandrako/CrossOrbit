@@ -24,6 +24,10 @@ struct PendingReadingSession {
 // the RTC. Uses the days-from-civil algorithm so it is valid for any Gregorian date.
 int64_t koReaderCivilToEpoch(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second);
 
+// Format a UTC Unix epoch (seconds) as "YYYY-MM-DD HH:MM:SS" into buf (needs >= 20 bytes).
+// The inverse of koReaderCivilToEpoch; used for KOReader annotation/bookmark datetimes.
+void koReaderEpochToDatetime(int64_t epoch, char* buf, size_t bufLen);
+
 /**
  * Singleton buffer of reading sessions awaiting upload, persisted to
  * /.crosspoint/pending_sessions.json. Sessions accumulate as books are closed and

@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
-#include <ctime>
 
 #include "CrossPointSettings.h"
 #include "Epub/Section.h"
@@ -18,7 +17,6 @@
 #include "HalClock.h"
 #include "KOReaderCredentialStore.h"
 #include "KOReaderDocumentId.h"
-#include "PendingReadingSessions.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
 #include "SdCardFontSystem.h"
@@ -78,9 +76,6 @@ const char* matchMethodName(const DocumentMatchMethod method) {
   return method == DocumentMatchMethod::FILENAME ? "filename" : "binary";
 }
 
-// Minimum free heap before attempting the best-effort page-stats flush. Above the
-// client's TLS floor (~55KB) so the flush never runs the device to the edge.
-constexpr uint32_t PAGE_STATS_MIN_FREE_HEAP = 62000;
 
 void syncTimeWithNTP() {
 #ifndef SIMULATOR
@@ -161,12 +156,6 @@ void KOReaderSyncActivity::saveProgressAndReturn(const CrossPointPosition& posit
     return;
   }
   RecentBookProgress::saveCachedEpubPercent(*epub, position.spineIndex, position.pageNumber, pageCount);
-
-  // Remote progress applied; release the epub to free heap, then flush buffered
-  // reading sessions (silent, best-effort) while WiFi is still up.
-  epub.reset();
-  flushPendingReadingSessions();
-
   returnToReader();
 }
 
@@ -225,52 +214,6 @@ void KOReaderSyncActivity::onWifiSelectionComplete(const bool success) {
   requestUpdate(true);
 
   performSync();
-}
-
-void KOReaderSyncActivity::flushPendingReadingSessions() {
-  if (PENDING_STATS.empty()) {
-    return;
-  }
-
-  // Runs only after the progress sync has finished, so this never precedes the
-  // requests the user cares about. Still, guard the heap: the page-stats upload
-  // needs a TLS handshake (~48KB), and on low-RAM devices attempting it when heap
-  // is already tight risks fragmenting the radio/TLS state. Skip and retry next
-  // sync rather than push the device to the edge.
-  const uint32_t freeHeap = ESP.getFreeHeap();
-  if (freeHeap < PAGE_STATS_MIN_FREE_HEAP) {
-    LOG_DBG("KOSync", "Skipping session flush: heap too low (%u < %u)", (unsigned)freeHeap,
-            (unsigned)PAGE_STATS_MIN_FREE_HEAP);
-    return;
-  }
-
-  const int64_t nowEpoch = static_cast<int64_t>(time(nullptr));
-  // A device with no RTC dates its sessions from this NTP-synced clock. If NTP did
-  // not set a plausible time, skip sessions that need it rather than misdate them.
-  const bool timeIsValid = nowEpoch >= 1600000000LL;
-  bool hasSynthetic = false;
-  for (const auto& session : PENDING_STATS.sessions()) {
-    if (session.startEpoch <= 0) {
-      hasSynthetic = true;
-      break;
-    }
-  }
-  if (!timeIsValid && hasSynthetic) {
-    LOG_ERR("KOSync", "Skipping session flush: no valid clock to date %u buffered sessions",
-            (unsigned)PENDING_STATS.size());
-    return;
-  }
-
-  // Silent, best-effort: no status render (avoids an extra e-ink refresh) and never
-  // changes the sync result state. A failure just keeps the buffer for next time.
-  const auto result =
-      KOReaderSyncClient::uploadPageStats(PENDING_STATS.sessions(), SETTINGS.getEffectiveDeviceName(), nowEpoch);
-  if (result == KOReaderSyncClient::OK) {
-    LOG_INF("KOSync", "Flushed %u reading session(s) to server", (unsigned)PENDING_STATS.size());
-    PENDING_STATS.clear();
-  } else {
-    LOG_ERR("KOSync", "Reading session flush failed: %s", KOReaderSyncClient::errorString(result).c_str());
-  }
 }
 
 void KOReaderSyncActivity::performSync() {
@@ -579,9 +522,10 @@ void KOReaderSyncActivity::performUpload() {
 
   const auto result = KOReaderSyncClient::updateProgress(progress);
 
+  // Drop the radio while user reads the result; full teardown happens at silent reboot.
+  wifiOff();
+
   if (result != KOReaderSyncClient::OK) {
-    // Drop the radio while user reads the result; full teardown happens at silent reboot.
-    wifiOff();
     {
       RenderLock lock(*this);
       state = SYNC_FAILED;
@@ -590,14 +534,6 @@ void KOReaderSyncActivity::performUpload() {
     requestUpdate();
     return;
   }
-
-  // Progress upload succeeded and the epub is already released, so heap is at its
-  // highest point of the sync. Flush buffered reading sessions now (silent,
-  // best-effort) before the radio goes down.
-  flushPendingReadingSessions();
-
-  // Drop the radio while user reads the result; full teardown happens at silent reboot.
-  wifiOff();
 
   {
     RenderLock lock(*this);

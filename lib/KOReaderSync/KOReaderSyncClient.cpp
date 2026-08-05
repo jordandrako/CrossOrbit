@@ -15,16 +15,15 @@
 #include <base64.h>
 #endif
 
+#include <AppVersion.h>
+
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <memory>
 #include <string>
 
-#include <AppVersion.h>
-
 #include "KOReaderCredentialStore.h"
-#include "PendingReadingSessions.h"
 
 #ifndef SIMULATOR
 // wolfSSL is built with DEBUG_WOLFSSL, whose Arduino backend expects the app to
@@ -479,170 +478,6 @@ KOReaderSyncClient::Error KOReaderSyncClient::updateProgress(const KOReaderProgr
   lastTransportError = (httpCode < 0) ? httpCode : 0;
 
   LOG_DBG("KOSync", "Update progress response: %d", httpCode);
-
-  if (httpCode <= 0) return NETWORK_ERROR;
-  if (httpCode == 200 || httpCode == 202) return OK;
-  if (httpCode == 401) return AUTH_FAILED;
-  return SERVER_ERROR;
-#endif
-}
-
-namespace {
-constexpr int PAGE_STATS_CHUNK_SECONDS = 1500;         // Split a session into events no longer than this
-constexpr int PAGE_STATS_MAX_EVENTS_PER_SESSION = 30;  // Cap events per session (marathon-read guard)
-constexpr size_t PAGE_STATS_MAX_EVENTS = 500;          // Server accepts at most 500 events per request
-constexpr size_t PAGE_STATS_MAX_BOOKS = 50;            // Server accepts at most 50 books per request
-
-std::string clampStr(const std::string& value, size_t maxLen) {
-  return value.size() <= maxLen ? value : value.substr(0, maxLen);
-}
-
-// Builds the page-stats JSON request body from buffered sessions. Sessions are
-// grouped by document hash and each is expanded into contiguous events (so the
-// server clusters them into one session). Sessions captured without an RTC
-// (startEpoch == 0) are dated ending at nowEpoch. Returns the number of events
-// written; 0 means there is nothing worth sending.
-size_t buildPageStatsBody(const std::vector<PendingReadingSession>& sessions, const std::string& deviceModel,
-                          int64_t nowEpoch, std::string& outBody) {
-  JsonDocument doc;
-  doc["deviceId"] = DEVICE_ID;
-  doc["deviceModel"] = clampStr(deviceModel.empty() ? std::string("CrossOrbit") : deviceModel, 100);
-  doc["pluginVersion"] = clampStr(std::string(CROSSINK_VERSION), 20);
-  JsonArray books = doc["books"].to<JsonArray>();
-
-  std::vector<std::string> hashes;
-  std::vector<int64_t> floorEpoch;   // next event for this hash must start after this
-  std::vector<JsonArray> eventArrays;
-  size_t totalEvents = 0;
-
-  for (const auto& s : sessions) {
-    if (s.docHash.empty() || s.durationSeconds == 0) continue;
-    if (totalEvents >= PAGE_STATS_MAX_EVENTS) break;
-
-    int bookIndex = -1;
-    for (size_t j = 0; j < hashes.size(); j++) {
-      if (hashes[j] == s.docHash) {
-        bookIndex = static_cast<int>(j);
-        break;
-      }
-    }
-    if (bookIndex < 0) {
-      if (hashes.size() >= PAGE_STATS_MAX_BOOKS) continue;
-      JsonObject bookObj = books.add<JsonObject>();
-      bookObj["hash"] = s.docHash;
-      hashes.push_back(s.docHash);
-      floorEpoch.push_back(0);
-      eventArrays.push_back(bookObj["events"].to<JsonArray>());
-      bookIndex = static_cast<int>(hashes.size()) - 1;
-    }
-
-    int64_t start = s.startEpoch > 0 ? s.startEpoch : (nowEpoch - static_cast<int64_t>(s.durationSeconds));
-    if (start < 1) start = 1;
-    // Keep events for the same book strictly ordered; overlapping/synthetic
-    // sessions are pushed just past the previous one so they cluster cleanly.
-    if (start <= floorEpoch[bookIndex]) start = floorEpoch[bookIndex] + 1;
-
-    const uint32_t duration = s.durationSeconds;
-    int chunks = static_cast<int>((duration + PAGE_STATS_CHUNK_SECONDS - 1) / PAGE_STATS_CHUNK_SECONDS);
-    if (chunks < 1) chunks = 1;
-    if (chunks > PAGE_STATS_MAX_EVENTS_PER_SESSION) chunks = PAGE_STATS_MAX_EVENTS_PER_SESSION;
-    const uint32_t baseDuration = duration / static_cast<uint32_t>(chunks);
-    const uint32_t remainder = duration % static_cast<uint32_t>(chunks);
-
-    const int32_t pageSpan = static_cast<int32_t>(s.endPage) - static_cast<int32_t>(s.startPage);
-    int64_t eventStart = start;
-    uint32_t cumulative = 0;
-    JsonArray& events = eventArrays[bookIndex];
-    for (int k = 0; k < chunks; k++) {
-      if (totalEvents >= PAGE_STATS_MAX_EVENTS) break;
-      const uint32_t chunkDuration = baseDuration + (static_cast<uint32_t>(k) < remainder ? 1u : 0u);
-      cumulative += chunkDuration;
-
-      int32_t page = static_cast<int32_t>(s.startPage);
-      if (duration > 0) {
-        page += static_cast<int32_t>((static_cast<int64_t>(pageSpan) * cumulative) / duration);
-      }
-      if (page < 0) page = 0;
-      if (page > s.totalPages) page = s.totalPages;
-
-      JsonObject event = events.add<JsonObject>();
-      event["page"] = page;
-      event["startTime"] = eventStart;
-      event["durationSeconds"] = chunkDuration;
-      event["totalPages"] = s.totalPages == 0 ? 1 : s.totalPages;
-
-      eventStart += chunkDuration;
-      totalEvents++;
-    }
-    floorEpoch[bookIndex] = eventStart;
-  }
-
-  if (totalEvents == 0) return 0;
-  serializeJson(doc, outBody);
-  return totalEvents;
-}
-}  // namespace
-
-KOReaderSyncClient::Error KOReaderSyncClient::uploadPageStats(const std::vector<PendingReadingSession>& sessions,
-                                                              const std::string& deviceModel, int64_t nowEpoch) {
-  lastHttpCode = 0;
-  lastTransportError = 0;
-  if (!KOREADER_STORE.hasCredentials()) {
-    LOG_DBG("KOSync", "No credentials configured");
-    return NO_CREDENTIALS;
-  }
-  if (sessions.empty()) return OK;
-
-  std::string body;
-  const size_t eventCount = buildPageStatsBody(sessions, deviceModel, nowEpoch, body);
-  if (eventCount == 0) return OK;
-
-  const std::string url = KOREADER_STORE.getBaseUrl() + "/plugin/page-stats";
-  LOG_DBG("KOSync", "Uploading page stats: %s events=%u (heap: %u)", url.c_str(), (unsigned)eventCount,
-          (unsigned)ESP.getFreeHeap());
-  if (insufficientHeap()) return LOW_MEMORY;
-
-#ifdef SIMULATOR
-  HTTPClient http;
-  std::unique_ptr<WiFiClientSecure> secureClient;
-  WiFiClient plainClient;
-
-  if (isHttpsUrl(url)) {
-    secureClient.reset(new WiFiClientSecure);
-    secureClient->setInsecure();
-    http.begin(*secureClient, url.c_str());
-  } else {
-    http.begin(plainClient, url.c_str());
-  }
-  addAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
-
-  const int httpCode = http.POST(body.c_str());
-  lastHttpCode = httpCode;
-  lastTransportError = (httpCode < 0) ? httpCode : 0;
-  http.end();
-
-  LOG_DBG("KOSync", "Page stats response: %d", httpCode);
-
-  if (httpCode == 200 || httpCode == 202) return OK;
-  if (httpCode == 401) return AUTH_FAILED;
-  if (httpCode < 0) return NETWORK_ERROR;
-  return SERVER_ERROR;
-#else
-  freeink::SecureHttpClient http;
-  http.setInsecure();
-  if (!http.begin(url)) {
-    LOG_ERR("KOSync", "Bad URL: %s", url.c_str());
-    return NETWORK_ERROR;
-  }
-  applyAuthHeaders(http);
-  http.addHeader("Content-Type", "application/json");
-  const int httpCode = http.sendRequest("POST", body);
-  http.end();
-  lastHttpCode = httpCode;
-  lastTransportError = (httpCode < 0) ? httpCode : 0;
-
-  LOG_DBG("KOSync", "Page stats response: %d", httpCode);
 
   if (httpCode <= 0) return NETWORK_ERROR;
   if (httpCode == 200 || httpCode == 202) return OK;

@@ -24,6 +24,7 @@
 #include <new>
 
 #include "../settings/DictionarySelectActivity.h"
+#include "../settings/BookOrbitSettingsActivity.h"
 #include "../settings/KOReaderSettingsActivity.h"
 #include "BookStatsActivity.h"
 #include "ClipSelectionActivity.h"
@@ -39,12 +40,13 @@
 #include "EpubReaderUtils.h"
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
-#include "KOReaderDocumentId.h"
+#include "BookOrbitSyncActivity.h"
 #include "KOReaderSyncActivity.h"
+#include <BookOrbitCapture.h>
+#include <BookOrbitConfig.h>
 #include "LookedUpWordsActivity.h"
 #include "MappedInputManager.h"
 #include "NearbyBookPositionSyncActivity.h"
-#include "PendingReadingSessions.h"
 #include "ProgressMapper.h"
 #include "QrDisplayActivity.h"
 #include "ReaderUtils.h"
@@ -2166,43 +2168,10 @@ void EpubReaderActivity::onExit() {
       refreshCachedTimeLeftEstimate();
       stats.save(epub->getCachePath());
 
-      // Buffer this session for later push to a BookOrbit / KOReader-plugin server.
-      // Only real sessions (>= 60s active reading) are kept, and only when KOReader
-      // sync is configured. Dating uses the RTC when present; otherwise the session
-      // is dated at sync time (startEpoch left 0, resolved during the upload).
-      if (elapsedSecs >= 60 && KOREADER_STORE.hasCredentials()) {
-        PendingReadingSession pending;
-        pending.docHash = (KOREADER_STORE.getMatchMethod() == DocumentMatchMethod::FILENAME)
-                              ? KOReaderDocumentId::calculateFromFilename(epub->getPath())
-                              : KOReaderDocumentId::calculate(epub->getPath());
-        if (!pending.docHash.empty()) {
-          uint16_t year = 0;
-          uint8_t month = 0, day = 0, hour = 0, minute = 0;
-          if (halClock.getDateTime(year, month, day, hour, minute)) {
-            const int64_t endEpoch = koReaderCivilToEpoch(year, month, day, hour, minute, 0);
-            const int64_t startEpoch = endEpoch - static_cast<int64_t>(elapsedSecs);
-            pending.startEpoch = startEpoch > 0 ? startEpoch : 1;
-          }
-          pending.durationSeconds = elapsedSecs;
-          pending.totalPages = 1000;
-          const float startPercent = hasSessionStartProgress ? sessionStartProgressPercent : 0.0f;
-          float endPercent = getCurrentBookProgressPercent();
-          if (endPercent <= 0.0f && hasSessionStartProgress) {
-            endPercent = startPercent;
-          }
-          const auto pctToPseudoPage = [](float pct) -> uint16_t {
-            if (pct < 0.0f) pct = 0.0f;
-            if (pct > 100.0f) pct = 100.0f;
-            return static_cast<uint16_t>(pct * 10.0f + 0.5f);
-          };
-          pending.startPage = pctToPseudoPage(startPercent);
-          pending.endPage = pctToPseudoPage(endPercent);
-          PENDING_STATS.add(pending);
-          LOG_DBG("ERS", "Buffered reading session: dur=%lus pages=%u->%u hash=%s",
-                  static_cast<unsigned long>(elapsedSecs), static_cast<unsigned>(pending.startPage),
-                  static_cast<unsigned>(pending.endPage), pending.docHash.c_str());
-        }
-      }
+      // Buffer this reading session for BookOrbit (no-op unless BookOrbit + sessions are on).
+      const float sessionStartPercent = hasSessionStartProgress ? sessionStartProgressPercent : 0.0f;
+      BookOrbitCapture::captureSession(epub->getPath(), elapsedSecs, sessionStartPercent,
+                                       getCurrentBookProgressPercent());
     }
     globalStats.save();
   }
@@ -3454,6 +3423,44 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       }
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::BOOKORBIT_SYNC: {
+      if (activeFootnotePreview) {
+        requestUpdate();
+        break;
+      }
+      // When BookOrbit isn't set up yet, jump straight to its settings instead of a
+      // pointless reboot into network mode that would only report "not configured".
+      BOOKORBIT.ensureLoaded();
+      if (!BOOKORBIT.isConfigured()) {
+        pauseReadingPaceTimer("bookorbit_settings");
+        startActivityForResult(std::make_unique<BookOrbitSettingsActivity>(renderer, mappedInput),
+                               [this](const ActivityResult&) { resumeReadingPaceTimer("bookorbit_settings_return"); });
+        break;
+      }
+      const int currentPage = section ? section->currentPage : nextPageNumber;
+      const int totalPages = section ? section->estimatedTotalPages() : cachedChapterTotalPageCount;
+
+      // Persist current position so the reader resumes at the right page on return.
+      if (!saveProgress(currentSpineIndex, currentPage, totalPages)) {
+        LOG_ERR("BOSync", "Aborting sync because current progress could not be saved");
+        pendingSyncSaveError = true;
+        requestUpdate();
+        return;
+      }
+
+      auto boActivity = makeUniqueNoThrow<BookOrbitSyncActivity>(renderer, mappedInput);
+      if (!boActivity) {
+        LOG_ERR("BOSync", "OOM: restart handoff (free=%u maxAlloc=%u)", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+        drawToast(renderer, tr(STR_KOREADER_SYNC_LOW_MEMORY));
+        delay(1200);
+        requestUpdate();
+        break;
+      }
+
+      pauseReadingPaceTimer("bookorbit_sync");
+      activityManager.replaceActivity(std::move(boActivity));
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::NEARBY_POSITION_SYNC: {
       const int currentPage = section ? section->currentPage : nextPageNumber;
       const int totalPages = section ? section->estimatedTotalPages() : std::max(1, cachedChapterTotalPageCount);
@@ -3546,6 +3553,12 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
             BOOKMARKS.addBookmark(spine, progress, bookmarkPageCount, chapterTitle, paragraphIndex, snippet);
         bookmarkFeedbackType = (addResult == BookmarkStore::AddResult::Added) ? BookmarkFeedbackType::Added
                                                                               : BookmarkFeedbackType::LimitReached;
+
+        // Buffer this bookmark for BookOrbit (no-op unless BookOrbit + bookmarks are on).
+        if (addResult == BookmarkStore::AddResult::Added) {
+          BookOrbitCapture::captureBookmark(epub, currentSpineIndex, paragraphIndex, progress,
+                                            chapterTitle ? chapterTitle : "", snippet);
+        }
       }
       pendingBookmarkFeedback = true;
       bookmarkFeedbackShowTime = millis();
@@ -3946,6 +3959,11 @@ void EpubReaderActivity::startClipSelection() {
         clippingFeedback = addResult == ClippingStore::AddResult::LimitReached ? tr(STR_CLIPPING_LIMIT_REACHED)
                            : saved                                             ? tr(STR_CLIPPING_SAVED)
                                                                                : tr(STR_CLIPPING_FAILED);
+
+        // Buffer this clipping as a BookOrbit highlight (no-op unless BookOrbit + highlights are on).
+        if (saved) {
+          BookOrbitCapture::captureClipping(epub, currentSpineIndex, clip.paragraphIndex, clip.text, chapterTitle);
+        }
       }
     }
     resumeReadingPaceTimer("clip_selection_return");
@@ -4036,6 +4054,9 @@ void EpubReaderActivity::executeReaderQuickAction(CrossPointSettings::LONG_PRESS
                                  saveGlobalSettingsPreservingBookOverrides();
                                });
       }
+      break;
+    case CrossPointSettings::LONG_MENU_BOOKORBIT_SYNC:
+      onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction::BOOKORBIT_SYNC);
       break;
     case CrossPointSettings::LONG_MENU_MARK_FINISHED: {
       const bool newCompleted = !stats.isCompleted;

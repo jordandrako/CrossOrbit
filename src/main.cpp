@@ -73,6 +73,8 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include <nvs.h>
 #endif
 
+#include <BookOrbitCapture.h>
+
 #include "AppVersion.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -85,8 +87,6 @@ inline esp_sleep_wakeup_cause_t esp_sleep_get_wakeup_cause() { return ESP_SLEEP_
 #include "SilentRestart.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
-#include <BookOrbitCapture.h>
-
 #include "activities/reader/BookOrbitSyncActivity.h"
 #include "activities/reader/KOReaderSyncActivity.h"
 #include "activities/reader/ReadingStatsUtils.h"

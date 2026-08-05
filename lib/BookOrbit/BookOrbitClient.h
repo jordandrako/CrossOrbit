@@ -19,11 +19,11 @@ struct BookOrbitAnnotation {
 
 // Reading progress as stored on the BookOrbit / KOReader sync server.
 struct BookOrbitProgress {
-  std::string document;    // Document hash
-  std::string progress;    // KOReader xpath progress string
+  std::string document;     // Document hash
+  std::string progress;     // KOReader xpath progress string
   float percentage = 0.0f;  // 0.0 - 1.0
-  std::string device;      // Device name that last wrote it
-  int64_t timestamp = 0;   // Unix timestamp of the last update
+  std::string device;       // Device name that last wrote it
+  int64_t timestamp = 0;    // Unix timestamp of the last update
 };
 
 // ---- Two-way bookmark exchange (POST /plugin/bookmarks/exchange[-ack]) ----

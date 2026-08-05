@@ -1,6 +1,8 @@
 #include "EpubReaderActivity.h"
 
 #include <Arduino.h>
+#include <BookOrbitCapture.h>
+#include <BookOrbitConfig.h>
 #include <Epub/Page.h>
 #include <Epub/blocks/TextBlock.h>
 #include <FontCacheManager.h>
@@ -23,9 +25,10 @@
 #include <memory>
 #include <new>
 
-#include "../settings/DictionarySelectActivity.h"
 #include "../settings/BookOrbitSettingsActivity.h"
+#include "../settings/DictionarySelectActivity.h"
 #include "../settings/KOReaderSettingsActivity.h"
+#include "BookOrbitSyncActivity.h"
 #include "BookStatsActivity.h"
 #include "ClipSelectionActivity.h"
 #include "ClippingStore.h"
@@ -40,10 +43,7 @@
 #include "EpubReaderUtils.h"
 #include "GlobalActions.h"
 #include "KOReaderCredentialStore.h"
-#include "BookOrbitSyncActivity.h"
 #include "KOReaderSyncActivity.h"
-#include <BookOrbitCapture.h>
-#include <BookOrbitConfig.h>
 #include "LookedUpWordsActivity.h"
 #include "MappedInputManager.h"
 #include "NearbyBookPositionSyncActivity.h"

@@ -149,7 +149,7 @@ constexpr int PAGE_STATS_MAX_EVENTS_PER_SESSION = 30;
 constexpr size_t PAGE_STATS_MAX_EVENTS = 500;
 constexpr size_t GROUP_MAX_BOOKS = 50;
 constexpr size_t ANNOTATIONS_MAX_TOTAL = 100;
-constexpr size_t BOOKMARKS_MAX_PER_BOOK = 50;    // server BOOKMARK_EXCHANGE_MAX_CHANGES
+constexpr size_t BOOKMARKS_MAX_PER_BOOK = 50;       // server BOOKMARK_EXCHANGE_MAX_CHANGES
 constexpr size_t BOOKMARK_EXCHANGE_MAX_KEYS = 500;  // server BOOKMARK_EXCHANGE_MAX_KEYS
 
 int findOrAddBook(JsonArray& books, std::vector<std::string>& hashes, std::vector<JsonArray>& childArrays,

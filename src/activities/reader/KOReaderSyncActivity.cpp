@@ -76,7 +76,6 @@ const char* matchMethodName(const DocumentMatchMethod method) {
   return method == DocumentMatchMethod::FILENAME ? "filename" : "binary";
 }
 
-
 void syncTimeWithNTP() {
 #ifndef SIMULATOR
   if (!halClock.syncSystemTimeFromNTP()) {

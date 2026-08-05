@@ -626,7 +626,7 @@ std::string normalizeWord(const std::string& word) {
       case 0x2013:
       case 0x2014:
         out.push_back('-');
-        break;  // en / em dash
+        break;      // en / em dash
       case 0x00AD:  // soft hyphen
       case 0x00A0:  // non-breaking space
         break;      // drop

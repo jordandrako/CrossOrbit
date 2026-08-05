@@ -1,6 +1,7 @@
 #include "BookOrbitSyncActivity.h"
 
 #include <BookOrbitCapture.h>
+#include <ChapterXPathResolver.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <KOReaderDocumentId.h>
@@ -14,15 +15,13 @@
 #include <algorithm>
 #include <ctime>
 
+#include "BookOrbitBookmarkSync.h"
 #include "CrossPointSettings.h"
 #include "Epub/Section.h"
 #include "EpubReaderUtils.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
 #include "SdCardFontSystem.h"
-#include <ChapterXPathResolver.h>
-
-#include "BookOrbitBookmarkSync.h"
 #include "SilentRestart.h"
 #include "activities/ActivityManager.h"
 #include "activities/home/RecentBookProgress.h"
@@ -57,8 +56,9 @@ void wifiOff() {
 }  // namespace
 
 std::string BookOrbitSyncActivity::documentHashForConfig() const {
-  return BOOKORBIT.getMatchMethod() == BookOrbitMatchMethod::FILENAME ? KOReaderDocumentId::calculateFromFilename(epubPath)
-                                                                      : KOReaderDocumentId::calculate(epubPath);
+  return BOOKORBIT.getMatchMethod() == BookOrbitMatchMethod::FILENAME
+             ? KOReaderDocumentId::calculateFromFilename(epubPath)
+             : KOReaderDocumentId::calculate(epubPath);
 }
 
 std::string BookOrbitSyncActivity::syncErrorMessage(BookOrbitClient::Error error) const {
@@ -503,8 +503,8 @@ void BookOrbitSyncActivity::render(RenderLock&&) {
       const bool selected = selectedOption == option;
       if (selected) renderer.fillRect(screen.x + metrics.contentSidePadding, by, buttonW, buttonH);
       renderer.drawRect(screen.x + metrics.contentSidePadding, by, buttonW, buttonH, true);
-      const int textX =
-          screen.x + metrics.contentSidePadding + (buttonW - renderer.getTextWidth(UI_10_FONT_ID, actionLabels[option])) / 2;
+      const int textX = screen.x + metrics.contentSidePadding +
+                        (buttonW - renderer.getTextWidth(UI_10_FONT_ID, actionLabels[option])) / 2;
       renderer.drawText(UI_10_FONT_ID, textX, by + (buttonH - lineHeight) / 2, actionLabels[option], !selected);
     }
 

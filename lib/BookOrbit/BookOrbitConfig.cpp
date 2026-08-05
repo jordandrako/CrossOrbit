@@ -28,7 +28,7 @@ bool BookOrbitConfig::fromJson(JsonVariantConst doc) {
 
   const uint8_t method = doc["matchMethod"] | static_cast<uint8_t>(0);
   matchMethod = method <= static_cast<uint8_t>(BookOrbitMatchMethod::BINARY) ? static_cast<BookOrbitMatchMethod>(method)
-                                                                            : BookOrbitMatchMethod::FILENAME;
+                                                                             : BookOrbitMatchMethod::FILENAME;
 
   syncProgress = doc["syncProgress"] | true;
   syncSessions = doc["syncSessions"] | true;

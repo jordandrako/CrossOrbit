@@ -16,10 +16,10 @@ namespace fui = freeink::ui;
 
 namespace {
 constexpr int MENU_ITEMS = 8;
-const StrId menuNames[MENU_ITEMS] = {
-    StrId::STR_BOOKORBIT_SERVER_URL,     StrId::STR_BOOKORBIT_USERNAME,       StrId::STR_BOOKORBIT_PASSWORD,
-    StrId::STR_BOOKORBIT_MATCH_METHOD,   StrId::STR_BOOKORBIT_SYNC_PROGRESS,  StrId::STR_BOOKORBIT_SYNC_SESSIONS,
-    StrId::STR_BOOKORBIT_SYNC_HIGHLIGHTS, StrId::STR_BOOKORBIT_SYNC_BOOKMARKS};
+const StrId menuNames[MENU_ITEMS] = {StrId::STR_BOOKORBIT_SERVER_URL,      StrId::STR_BOOKORBIT_USERNAME,
+                                     StrId::STR_BOOKORBIT_PASSWORD,        StrId::STR_BOOKORBIT_MATCH_METHOD,
+                                     StrId::STR_BOOKORBIT_SYNC_PROGRESS,   StrId::STR_BOOKORBIT_SYNC_SESSIONS,
+                                     StrId::STR_BOOKORBIT_SYNC_HIGHLIGHTS, StrId::STR_BOOKORBIT_SYNC_BOOKMARKS};
 constexpr fui::ActionId ACTION_ROW = 1;
 }  // namespace
 
@@ -125,16 +125,15 @@ void BookOrbitSettingsActivity::handleSelection() {
                            });
   } else if (selectedIndex == 2) {
     // Password
-    startActivityForResult(
-        std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_BOOKORBIT_PASSWORD),
-                                                BOOKORBIT.getPassword(), 64, InputType::Password),
-        [this](const ActivityResult& result) {
-          if (!result.isCancelled) {
-            const auto& kb = std::get<KeyboardResult>(result.data);
-            BOOKORBIT.setCredentials(BOOKORBIT.getUsername(), kb.text);
-            BOOKORBIT.saveToFile();
-          }
-        });
+    startActivityForResult(std::make_unique<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_BOOKORBIT_PASSWORD),
+                                                                   BOOKORBIT.getPassword(), 64, InputType::Password),
+                           [this](const ActivityResult& result) {
+                             if (!result.isCancelled) {
+                               const auto& kb = std::get<KeyboardResult>(result.data);
+                               BOOKORBIT.setCredentials(BOOKORBIT.getUsername(), kb.text);
+                               BOOKORBIT.saveToFile();
+                             }
+                           });
   } else if (selectedIndex == 3) {
     // Document Matching - toggle between Filename and Binary
     const auto current = BOOKORBIT.getMatchMethod();

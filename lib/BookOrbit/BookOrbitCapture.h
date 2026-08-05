@@ -30,7 +30,7 @@ void captureClipping(const std::shared_ptr<Epub>& epub, int spineIndex, uint16_t
                      const std::string& text, const std::string& chapter);
 
 // Buffer a bookmark. Resolves the xpath position while the epub is loaded.
-void captureBookmark(const std::shared_ptr<Epub>& epub, int spineIndex, uint16_t paragraphIndex, float intraSpineProgress,
-                     const std::string& chapter, const std::string& snippet);
+void captureBookmark(const std::shared_ptr<Epub>& epub, int spineIndex, uint16_t paragraphIndex,
+                     float intraSpineProgress, const std::string& chapter, const std::string& snippet);
 
 }  // namespace BookOrbitCapture

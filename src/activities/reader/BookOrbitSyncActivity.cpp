@@ -118,17 +118,27 @@ void BookOrbitSyncActivity::flushExtensions() {
   BookOrbitCapture::ensureLoaded();  // reload buffers after the network reboot
   const int64_t nowEpoch = static_cast<int64_t>(time(nullptr));
 
+  // Show what the sync is doing before each (slow) network step. Rendered while state is UPLOADING.
+  auto showStatus = [this](const char* msg) {
+    {
+      RenderLock lock(*this);
+      state = UPLOADING;
+      statusMessage = msg;
+    }
+    (void)requestUpdateAndWait();
+  };
+
+  // Each extension only touches the network when it actually has something buffered to send.
   if (BOOKORBIT.syncSessionsEnabled() && !PENDING_STATS.empty()) {
+    showStatus(tr(STR_UPLOADING_SESSIONS));
     if (BookOrbitClient::uploadPageStats(PENDING_STATS.sessions(), nowEpoch) == BookOrbitClient::OK) {
       LOG_INF("BOSync", "Flushed %u session(s)", (unsigned)PENDING_STATS.size());
       PENDING_STATS.clear();
     }
   }
-  if (!BOOKORBIT.syncHighlightsEnabled()) {
-    LOG_INF("BOSync", "Highlight sync disabled; skipping");
-  } else if (PENDING_HIGHLIGHTS.empty()) {
-    LOG_INF("BOSync", "No pending highlights to flush");
-  } else {
+
+  if (BOOKORBIT.syncHighlightsEnabled() && !PENDING_HIGHLIGHTS.empty()) {
+    showStatus(tr(STR_UPLOADING_HIGHLIGHTS));
     ensureEpubLoaded();
     const std::string openHash = epub ? documentHashForConfig() : std::string();
     if (!epub || openHash.empty()) {
@@ -169,7 +179,9 @@ void BookOrbitSyncActivity::flushExtensions() {
       }
     }
   }
-  if (BOOKORBIT.syncBookmarksEnabled()) {
+
+  if (BOOKORBIT.syncBookmarksEnabled() && !PENDING_BOOKMARKS.empty()) {
+    showStatus(tr(STR_UPLOADING_BOOKMARKS));
     ensureEpubLoaded();
     const std::string openHash = epub ? documentHashForConfig() : std::string();
     if (epub && !openHash.empty()) {
@@ -182,7 +194,7 @@ void BookOrbitSyncActivity::flushExtensions() {
       }
       if (ok && !others.empty()) BookOrbitClient::uploadBookmarks(others, nowEpoch);
       if (ok) PENDING_BOOKMARKS.clear();
-    } else if (!PENDING_BOOKMARKS.empty()) {
+    } else {
       // No EPUB (non-EPUB book or load failure): fall back to a one-way push of everything.
       if (BookOrbitClient::uploadBookmarks(PENDING_BOOKMARKS.bookmarks(), nowEpoch) == BookOrbitClient::OK) {
         PENDING_BOOKMARKS.clear();
@@ -336,6 +348,10 @@ void BookOrbitSyncActivity::performSync() {
       remotePosition.pageNumber = std::max(remotePosition.pageNumber, static_cast<int>(*paragraphPage));
     }
   }
+
+  BookOrbitCapture::ensureLoaded();
+  pendingHighlightCount = BOOKORBIT.syncHighlightsEnabled() ? PENDING_HIGHLIGHTS.size() : 0;
+  pendingBookmarkCount = BOOKORBIT.syncBookmarksEnabled() ? PENDING_BOOKMARKS.size() : 0;
 
   {
     RenderLock lock(*this);
@@ -494,7 +510,23 @@ void BookOrbitSyncActivity::render(RenderLock&&) {
     renderer.drawText(UI_10_FONT_ID, screen.x + metrics.contentSidePadding, top + RESULT_LOCAL_PAGE_Y_OFFSET, buf);
 
     const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    const int buttonY = top + RESULT_LOCAL_PAGE_Y_OFFSET + lineHeight + 12;
+
+    // What the next sync will push, shown only for categories that have buffered items. Drawn in
+    // the small font so two lines stay clear of the action buttons even in landscape.
+    const int smallLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+    int infoBottom = top + RESULT_LOCAL_PAGE_Y_OFFSET;
+    if (pendingHighlightCount > 0) {
+      infoBottom += smallLineHeight + 8;
+      snprintf(buf, sizeof(buf), tr(STR_PENDING_HIGHLIGHTS_FORMAT), static_cast<int>(pendingHighlightCount));
+      renderer.drawText(SMALL_FONT_ID, screen.x + metrics.contentSidePadding, infoBottom, buf);
+    }
+    if (pendingBookmarkCount > 0) {
+      infoBottom += smallLineHeight + 6;
+      snprintf(buf, sizeof(buf), tr(STR_PENDING_BOOKMARKS_FORMAT), static_cast<int>(pendingBookmarkCount));
+      renderer.drawText(SMALL_FONT_ID, screen.x + metrics.contentSidePadding, infoBottom, buf);
+    }
+
+    const int buttonY = infoBottom + lineHeight + 12;
     const int buttonH = 40;
     const int buttonW = screen.width - metrics.contentSidePadding * 2;
     const char* actionLabels[] = {tr(STR_APPLY_REMOTE), tr(STR_UPLOAD_LOCAL)};

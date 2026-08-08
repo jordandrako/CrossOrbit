@@ -74,6 +74,11 @@ class BookOrbitSyncActivity final : public Activity {
   bool wifiActivated = false;
   bool lockInitialConfirmRelease = false;
 
+  // Buffered items awaiting upload, snapshotted for the progress-found overview (0 when the
+  // feature is disabled). Only shown to tell the user what the next sync will push.
+  size_t pendingHighlightCount = 0;
+  size_t pendingBookmarkCount = 0;
+
   void onWifiSelectionComplete(bool success);
   void performSync();
   void performUpload();

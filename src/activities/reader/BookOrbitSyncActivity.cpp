@@ -3,6 +3,7 @@
 #include <BookOrbitCapture.h>
 #include <ChapterXPathResolver.h>
 #include <GfxRenderer.h>
+#include <HalClock.h>
 #include <I18n.h>
 #include <KOReaderDocumentId.h>
 #include <Logging.h>
@@ -10,7 +11,6 @@
 #include <PendingHighlights.h>
 #include <PendingReadingSessions.h>
 #include <WiFi.h>
-#include <esp_sntp.h>
 
 #include <algorithm>
 #include <ctime>
@@ -35,19 +35,17 @@ namespace {
 constexpr int RESULT_LOCAL_PAGE_Y_OFFSET = 200;
 
 void syncTimeWithNTP() {
-  if (esp_sntp_enabled()) esp_sntp_stop();
-  esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-  esp_sntp_setservername(0, "pool.ntp.org");
-  esp_sntp_init();
-  int retry = 0;
-  while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < 50) {
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    retry++;
+  // Route NTP through the HAL, which uses the esp-netif SNTP API and drains the DNS callback
+  // under lwIP's core lock. Calling esp_sntp_* directly from this task asserts in sys_untimeout
+  // ("Required to lock TCPIP core functionality!") under the v1.5.0 IDF (upstream issue 480).
+#ifndef SIMULATOR
+  if (!halClock.syncSystemTimeFromNTP()) {
+    LOG_DBG("BOSync", "NTP sync unavailable, using fallback");
   }
+#endif
 }
 
 void wifiOff() {
-  if (esp_sntp_enabled()) esp_sntp_stop();
   WiFi.disconnect(false);
   delay(100);
   WiFi.mode(WIFI_OFF);

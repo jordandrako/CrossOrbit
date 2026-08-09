@@ -9,6 +9,7 @@
 #include <string>
 
 #include "activities/Activity.h"
+#include "activities/ScreenTransitionRefresh.h"
 
 /**
  * One-stop BookOrbit sync: reading progress (interactive apply/upload) plus the enabled
@@ -73,6 +74,9 @@ class BookOrbitSyncActivity final : public Activity {
   int selectedOption = 0;  // 0 = apply remote, 1 = upload local
   bool wifiActivated = false;
   bool lockInitialConfirmRelease = false;
+
+  // Full-refresh on state transitions, fast-refresh on same-state repaints (X4-class panels).
+  ScreenTransitionRefresh screenTransitionRefresh;
 
   // Buffered items awaiting upload, snapshotted for the progress-found overview (0 when the
   // feature is disabled). Only shown to tell the user what the next sync will push.

@@ -1,0 +1,83 @@
+name: CrossOrbit Release
+
+# Fork-owned release workflow (kept separate from upstream's release.yml so upstream pulls never
+# conflict on it). Builds the two hardware firmwares with OTA pointed at THIS repo's releases and
+# publishes a GitHub Release. The device's "Check for Updates" reads releases/latest here and
+# verifies the firmware against GitHub's own asset sha256 - no catalog or signing needed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.5.0.1 (no leading v)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-platformio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Resolve release version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          # sticky reads ${crossink.version} directly; default reads CROSSINK_RELEASE_VERSION.
+          sed -i "/^\[crossink\]$/,/^\[/s/^version = .*/version = $VERSION/" platformio.ini
+
+      - name: Build CrossOrbit (OTA pointed at this repo)
+        env:
+          CROSSINK_RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+          # Override the compile-time OTA source so the device checks THIS fork's releases.
+          PLATFORMIO_BUILD_FLAGS: -DCROSSINK_OTA_RELEASE_URL=\"https://api.github.com/repos/${{ github.repository }}/releases/latest\"
+        run: pio run -j1 -e default -e sticky
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: v${{ env.RELEASE_VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: CrossOrbit v${{ env.RELEASE_VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            .pio/build/default/firmware-x3-x4-v${{ env.RELEASE_VERSION }}.bin
+            .pio/build/sticky/firmware-sticky-v${{ env.RELEASE_VERSION }}.bin

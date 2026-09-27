@@ -106,6 +106,8 @@ bool BookOrbitSyncActivity::ensureLocalProgressLoaded() {
                                             ? PositionCoordinateSpace::SourceDocument
                                             : PositionCoordinateSpace::CurrentDocument;
   localProgress = ProgressMapper::toKOReader(epub, localPos, space);
+  LOG_INF("BOSync", "Local progress: spine=%d page=%d/%d pct=%.4f valid=%d xpath=%s", currentSpineIndex, currentPage,
+          totalPagesInSpine, localProgress.percentage, (int)localProgress.valid, localProgress.xpath.c_str());
   const int tocIdx = epub->getTocIndexForSpineIndex(currentSpineIndex);
   localChapterName = tocIdx >= 0 ? epub->getTocItem(tocIdx).title : "";
   localProgressDeferred = false;
@@ -294,8 +296,12 @@ void BookOrbitSyncActivity::performSync() {
   }
 
   const auto result = BookOrbitClient::getProgress(documentHash, remoteProgress);
+  LOG_INF("BOSync", "Fetch progress: method=%s doc=%s -> %s (http=%d)",
+          BOOKORBIT.getMatchMethod() == BookOrbitMatchMethod::FILENAME ? "filename" : "binary", documentHash.c_str(),
+          BookOrbitClient::errorString(result).c_str(), BookOrbitClient::lastHttpCode);
 
   if (!ensureLocalProgressLoaded()) {
+    LOG_ERR("BOSync", "Local progress unavailable; EPUB needs re-optimizing for filename-based sync");
     {
       RenderLock lock(*this);
       state = SYNC_FAILED;
@@ -323,6 +329,8 @@ void BookOrbitSyncActivity::performSync() {
   }
 
   hasRemoteProgress = true;
+  LOG_INF("BOSync", "Remote progress: pct=%.4f device=%s xpath=%s", remoteProgress.percentage,
+          remoteProgress.device.c_str(), remoteProgress.progress.c_str());
   const PositionCoordinateSpace space = BOOKORBIT.getMatchMethod() == BookOrbitMatchMethod::FILENAME
                                             ? PositionCoordinateSpace::SourceDocument
                                             : PositionCoordinateSpace::CurrentDocument;
@@ -385,8 +393,12 @@ void BookOrbitSyncActivity::performUpload() {
   progress.percentage = localProgress.percentage;
   progress.device = SETTINGS.getEffectiveDeviceName();
 
+  LOG_INF("BOSync", "Upload progress: doc=%s pct=%.4f xpath=%s", progress.document.c_str(), progress.percentage,
+          progress.progress.c_str());
   const auto result = BookOrbitClient::updateProgress(progress);
   if (result != BookOrbitClient::OK) {
+    LOG_ERR("BOSync", "Upload progress failed: %s (http=%d)", BookOrbitClient::errorString(result).c_str(),
+            BookOrbitClient::lastHttpCode);
     wifiOff();
     {
       RenderLock lock(*this);
@@ -396,6 +408,8 @@ void BookOrbitSyncActivity::performUpload() {
     requestUpdate();
     return;
   }
+
+  LOG_INF("BOSync", "Progress uploaded (http=%d)", BookOrbitClient::lastHttpCode);
 
   // Progress uploaded; flush the extensions while WiFi is still up, then drop the radio.
   flushExtensions();

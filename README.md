@@ -56,7 +56,13 @@ CrossOrbit is a small set of commits rebased on top of upstream CrossInk. The Bo
 
 ## Development
 
-CrossOrbit uses PlatformIO. The hardware environments are `default` (X3/X4) and `sticky`:
+CrossOrbit uses PlatformIO. Before the first build, initialize the repository's submodules (including `freeink-sdk`):
+
+```sh
+git submodule update --init --recursive
+```
+
+The hardware environments are `default` (X3/X4) and `sticky`:
 
 ```sh
 pio run -e default --target upload   # Xteink X3 / X4

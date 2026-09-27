@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+## [v1.6.0.1] - 2026-09-26
+
 ### Added
 
 - BookOrbit Sync: a dedicated one-stop sync to a self-hosted BookOrbit library server, separate from KOReader Sync. Configure it under Settings > System > BookOrbit by entering your BookOrbit URL and login once; every endpoint is derived from that single URL. A BookOrbit Sync entry also appears in the reader menu and can be assigned to a button shortcut. Each feature can be enabled or disabled independently:
